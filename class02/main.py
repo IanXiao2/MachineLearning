@@ -16,9 +16,10 @@ import sklearn
 
 from sklearn.utils import shuffle
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder,LabelBinarizer
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold,GridSearchCV
 from sklearn.metrics import roc_auc_score,classification_report,confusion_matrix, f1_score, recall_score, roc_curve
 from sklearn.metrics import auc
+import sklearn.metrics as metrics
 
 train_path = "data/train_magnetic.csv"
 
@@ -101,12 +102,64 @@ def draw_roc(y_test, y_score, n_classes):
     plt.show()
 
 
+def param_grid_search(model,param_grid, X_train, y_train):
+
+    print('------------param_grid_search--------------')
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=11)
+    clf = GridSearchCV(estimator=model, param_grid = param_grid, scoring='f1_macro', cv=cv, n_jobs=2)
+    clf.fit(X_train, y_train)
+
+    print(clf.best_estimator_)
+    print(clf.cv_results_['mean_test_score'])
+    print(clf.best_params_)
+    print(clf.best_score_)
+
+    return clf.best_estimator_
+
+
+def train_predict(model, X_train, y_train, X_test, y_test, feature_names):
+
+    print('------------train_predict--------------')
+
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    y_score = model.predict_proba(X_test)
+
+    print(classification_report(y_test, y_pred))
+    print(confusion_matrix(y_test,y_pred))
+
+    eval_res = dict()
+
+    eval_res['acc'] = metrics.accuracy_score(y_test, y_pred)
+    eval_res['pre'] = metrics.precision_score(y_test, y_pred, average='macro')
+    eval_res['rec'] = metrics.recall_score(y_test, y_pred, average='macro')
+    eval_res['f1'] = metrics.f1_score(y_test, y_pred, average='macro')
+
+    eval_df = pd.DataFrame(eval_res, index = [0])
+    eval_df.to_csv('eval_res')
+
+    draw_roc(y_test, y_score, n_classes)
+
+    fig, ax = plt.subplots(figsize=(10, 10))
+    plot_importance(model, max_num_features=10,
+                    ax=ax, height=0.4, importance_type='gain').set_yticklabels(feature_names)
+    #plt.savefig('feature_importance.png')
+    plt.show()
+
+
+
 if __name__ == '__main__':
 
     params = {'booster': 'gbtree',
-              'max_depth':20,
-              'learning_rate':0.15,
-              'n_estimators':500,
+              'max_depth': 5,
+              'learning_rate': 0.15,
+              'n_estimators': 500,
+              'minchildweight': 1,
+              'colsample_bytree': 0.8,
+              'gamma': 0,
+              'reg_alpha': 0,
+              'reg_lambda': 1,
               'objective':'multi:softmax'}
 
     X_train, y_train, X_test, y_test, n_classes, feature_names = generate_dataset()
@@ -115,23 +168,16 @@ if __name__ == '__main__':
 
     model = xgb.XGBClassifier(**params)
 
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
-    y_score = model.predict_proba(X_test)
+    param_grid1 = {
+        "learning_rate": [0.15, 0.1, 0.05],
+        "max_depth": range(5, 20, 5),
+        "n_estimators": range(300, 500, 50)
+    }
+    model = param_grid_search(model, param_grid1, X_train, y_train)
 
-    print(classification_report(y_test, y_pred))
-    print(confusion_matrix(y_test,y_pred))
-    print(f1_score(y_test, y_pred, average=None))
-    print(f1_score(y_test, y_pred, average=None, labels=[0]))
-    print(recall_score(y_test, y_pred, average=None))
+    train_predict(model, X_train, y_train, X_test, y_test, feature_names)
 
-    draw_roc(y_test, y_score, n_classes)
 
-    fig, ax = plt.subplots(figsize=(15, 15))
-    plot_importance(model, max_num_features=10,
-                    ax=ax, height=0.4, importance_type='gain').set_yticklabels(feature_names)
-    #plt.savefig('feature_importance.png')
-    plt.show()
 
     print('--------')
 
